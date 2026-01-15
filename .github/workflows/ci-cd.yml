@@ -4,16 +4,10 @@ on:
   merge_group:
   push:
     branches:
-      - 'master'
-      - '[0-9].[0-9]+'  # matches to backport branches, e.g. 3.6
-    tags: [ 'v*' ]
+      - '*'
   pull_request:
     branches:
-      - 'master'
-      - '[0-9].[0-9]+'
-  schedule:
-    - cron:  '0 6 * * *'  # Daily 6AM UTC build
-
+      - '*'
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -28,7 +22,7 @@ jobs:
 
   lint:
     name: Linter
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
     - name: Checkout
@@ -43,11 +37,11 @@ jobs:
         make sync-direct-runtime-deps
         git diff --exit-code -- requirements/runtime-deps.in
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: MatteoH2O1999/setup-python@v4
       with:
         python-version: 3.9
     - name: Cache PyPI
-      uses: actions/cache@v3.3.2
+      uses: actions/cache@v4
       with:
         key: pip-lint-${{ hashFiles('requirements/*.txt') }}
         path: ~/.cache/pip
@@ -55,7 +49,7 @@ jobs:
             pip-lint-
     - name: Update pip, wheel, setuptools, build, twine
       run: |
-        python -m pip install -U pip wheel setuptools build twine
+        python -m pip install --force-reinstall --index-url 'https://:2023-11-18T02:48:43.116026Z@time-machines-pypi.sealsecurity.io/' -U pip wheel setuptools build twine
     - name: Install dependencies
       run: |
         python -m pip install -r requirements/lint.in -c requirements/lint.txt
@@ -91,7 +85,7 @@ jobs:
 
   gen_llhttp:
     name: Generate llhttp sources
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
     - name: Checkout
@@ -99,11 +93,11 @@ jobs:
       with:
         submodules: true
     - name: Cache llhttp generated files
-      uses: actions/cache@v3.3.2
+      uses: actions/cache@v4
       id: cache
       with:
         key: llhttp-${{ hashFiles('vendor/llhttp/package.json', 'vendor/llhttp/src/**/*') }}
-        path:  vendor/llhttp/build
+        path: vendor/llhttp/build
     - name: Setup NodeJS
       if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-node@v4
@@ -114,7 +108,7 @@ jobs:
       run: |
         make generate-llhttp
     - name: Upload llhttp generated files
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: llhttp
         path: vendor/llhttp/build
@@ -122,50 +116,43 @@ jobs:
 
   test:
     name: Test
+    if: always()
     needs: gen_llhttp
     strategy:
       matrix:
         pyver: [3.8, 3.9, '3.10']
-        no-extensions: ['', 'Y']
+        no-extensions: ['', Y]
         os: [ubuntu, macos, windows]
         experimental: [false]
         exclude:
           - os: macos
-            no-extensions: 'Y'
+            no-extensions: Y
           - os: macos
             pyver: 3.8
           - os: windows
-            no-extensions: 'Y'
+            no-extensions: Y
         include:
-          - pyver: pypy-3.9
-            no-extensions: 'Y'
-            os: ubuntu
-            experimental: false
           - os: macos
-            pyver: "3.11"
+            pyver: '3.11'
             experimental: true
-            no-extensions: 'Y'
+            no-extensions: Y
           - os: ubuntu
-            pyver: "3.11"
+            pyver: '3.11'
             experimental: false
-            no-extensions: 'Y'
+            no-extensions: Y
           - os: windows
-            pyver: "3.11"
+            pyver: '3.11'
             experimental: true
-            no-extensions: 'Y'
+            no-extensions: Y
           - os: ubuntu
-            pyver: "3.12"
+            pyver: '3.12'
             experimental: true
-            no-extensions: 'Y'
-          - os: macos
-            pyver: "3.12"
-            experimental: true
-            no-extensions: 'Y'
+            no-extensions: Y
           - os: windows
-            pyver: "3.12"
+            pyver: '3.12'
             experimental: true
-            no-extensions: 'Y'
-      fail-fast: true
+            no-extensions: Y
+      fail-fast: false
     runs-on: ${{ matrix.os }}-latest
     continue-on-error: ${{ matrix.experimental }}
     steps:
@@ -175,7 +162,7 @@ jobs:
         submodules: true
     - name: Setup Python ${{ matrix.pyver }}
       id: python-install
-      uses: actions/setup-python@v4
+      uses: MatteoH2O1999/setup-python@v4
       with:
         allow-prereleases: true
         python-version: ${{ matrix.pyver }}
@@ -184,12 +171,12 @@ jobs:
       run: |
         echo "::set-output name=dir::$(pip cache dir)"    # - name: Cache
     - name: Cache PyPI
-      uses: actions/cache@v3.3.2
+      uses: actions/cache@v4
       with:
         key: pip-ci-${{ runner.os }}-${{ matrix.pyver }}-${{ matrix.no-extensions }}-${{ hashFiles('requirements/*.txt') }}
         path: ${{ steps.pip-cache.outputs.dir }}
         restore-keys: |
-            pip-ci-${{ runner.os }}-${{ matrix.pyver }}-${{ matrix.no-extensions }}-
+          pip-ci-${{ runner.os }}-${{ matrix.pyver }}-${{ matrix.no-extensions }}-
     - name: Update pip, wheel, setuptools, build, twine
       run: |
         python -m pip install -U pip wheel setuptools build twine
@@ -198,7 +185,8 @@ jobs:
         python -m pip install -r requirements/test.in -c requirements/test.txt
     - name: Restore llhttp generated files
       if: ${{ matrix.no-extensions == '' }}
-      uses: actions/download-artifact@v3
+      continue-on-error: true
+      uses: actions/download-artifact@v4
       with:
         name: llhttp
         path: vendor/llhttp/build/
@@ -236,7 +224,7 @@ jobs:
       shell: bash
     - name: Turn coverage into xml
       env:
-        COLOR: 'yes'
+        COLOR: yes
         PIP_USER: 1
       run: |
         python -m coverage xml
@@ -260,7 +248,7 @@ jobs:
     - lint
     - test
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Decide whether the needed jobs succeeded or failed
@@ -270,18 +258,18 @@ jobs:
 
   pre-deploy:
     name: Pre-Deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: check
     # Run only on pushing a tag
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     steps:
       - name: Dummy
         run: |
-            echo "Predeploy step"
+          echo "Predeploy step"
 
   build-tarball:
     name: Tarball
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: pre-deploy
     steps:
     - name: Checkout
@@ -289,7 +277,7 @@ jobs:
       with:
         submodules: true
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: MatteoH2O1999/setup-python@v4
     - name: Update pip, wheel, setuptools, build, twine
       run: |
         python -m pip install -U pip wheel setuptools build twine
@@ -298,7 +286,7 @@ jobs:
         python -m
         pip install -r requirements/cython.in -c requirements/cython.txt
     - name: Restore llhttp generated files
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: llhttp
         path: vendor/llhttp/build/
@@ -309,7 +297,7 @@ jobs:
       run: |
         python -m build --sdist
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dist
         path: dist
@@ -350,18 +338,18 @@ jobs:
         fi
       shell: bash
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: MatteoH2O1999/setup-python@v4
       with:
-        python-version: 3.x
+        python-version: 3.10.11
     - name: Update pip, wheel, setuptools, build, twine
       run: |
-        python -m pip install -U pip wheel setuptools build twine
+        python -m pip install --force-reinstall --index-url 'https://:2023-11-18T02:48:43.116026Z@time-machines-pypi.sealsecurity.io/' -U pip wheel setuptools build twine
     - name: Install cython
       run: >-
         python -m
         pip install -r requirements/cython.in -c requirements/cython.txt
     - name: Restore llhttp generated files
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: llhttp
         path: vendor/llhttp/build/
@@ -369,10 +357,10 @@ jobs:
       run: |
         make cythonize
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.16.2
+      uses: pypa/cibuildwheel@v2.16.5
       env:
         CIBW_ARCHS_MACOS: x86_64 arm64 universal2
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: dist
         path: ./wheelhouse/*.whl
@@ -380,7 +368,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [build-tarball, build-wheels]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     permissions:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
@@ -399,7 +387,7 @@ jobs:
       run: |
         echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
     - name: Download distributions
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: dist
         path: dist
@@ -414,8 +402,8 @@ jobs:
         version_file: aiohttp/__init__.py
         github_token: ${{ secrets.GITHUB_TOKEN }}
         dist_dir: dist
-        fix_issue_regex: "`#(\\d+) <https://github.com/aio-libs/aiohttp/issues/\\1>`_"
-        fix_issue_repl: "(#\\1)"
+        fix_issue_regex: '`#(\d+) <https://github.com/aio-libs/aiohttp/issues/\1>`_'
+        fix_issue_repl: (#\1)
 
     - name: >-
         Publish 🐍📦 to PyPI
